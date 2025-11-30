@@ -1,8 +1,14 @@
 """
-CompressAI Model Comparison Script
-
+Pretrained Option:
 Loads a random image from the landscapes dataset and applies 5 compression models.
-Displays original + 5 reconstructions with PSNR and BPP metrics.
+Displays original and reconstructions with PSNR, BPP, encode/decode times.
+
+Retrained Option:
+Loads a random image from the landscapes dataset and applies the pretrained and retrained versions of
+factorized and hyperprior models.
+Displays original and reconstructions with PSNR, BPP, encode/decode times.
+
+
 """
 
 import os
@@ -76,7 +82,7 @@ def load_landscape_image():
 
 
 def main():
-    # Ask if user wants to test retrained models
+
     while True:
         choice = input("Test retrained models? (y/n): ").strip().lower()
         if choice in ("y", "n"):
@@ -86,7 +92,7 @@ def main():
     
     print()
     
-    # Load image
+
     img = load_landscape_image()
     
     # Convert to tensor [1, 3, H, W], normalized to [0,1]
@@ -99,10 +105,10 @@ def main():
     models = []
     
     if test_retrained:
-        # Retrained models mode: show 2 retrained + 2 pretrained counterparts (no quality selection)
+        # Retrained models 
         factorized_ckpt = "checkpoint_best_loss_factorized1e-3.pth.tar"  
         hyperprior_ckpt = "checkpoint_best_loss_hyperprior1e-3.pth.tar"
-        retrained_quality = 1  # Quality level used during training
+        retrained_quality = 1 
         
         print("Loading retrained models...\n")
         
@@ -129,7 +135,7 @@ def main():
         models.append(('Scale Hyperprior (Pretrained)', bmshj2018_hyperprior(quality=retrained_quality, pretrained=True)))
         
     else:
-        # Pretrained models mode: allow quality selection, show all 5 models
+        # Pretrained models
         while True:
             try:
                 quality = int(input("Enter desired quality level (1-6): "))
@@ -157,12 +163,12 @@ def main():
         model = model.eval().to(device)
         
         with torch.no_grad():
-            # Compress with timing
+            # Encode with timing
             start_time = time.time()
             compressed = model.compress(x)
             encode_time = time.time() - start_time
             
-            # Decompress with timing
+            # Decode with timing
             start_time = time.time()
             reconstructed = model.decompress(compressed["strings"], compressed["shape"])
             decode_time = time.time() - start_time
@@ -173,7 +179,7 @@ def main():
             psnr = compute_psnr(x, x_hat).item()
             bpp = compute_bpp(compressed["strings"], x.shape[2], x.shape[3])
             
-            # Store results
+            
             recon_np = x_hat.squeeze().permute(1, 2, 0).cpu().numpy()
             results.append({
                 'name': model_name,
@@ -187,19 +193,19 @@ def main():
             print(f"  PSNR: {psnr:.2f} dB, BPP: {bpp:.4f}")
             print(f"  Encode: {encode_time*1000:.1f} ms, Decode: {decode_time*1000:.1f} ms\n")
     
-    # Display results - adjust layout based on number of models
+    # Display results 
     if test_retrained:
-        # 2x3 grid: original + 4 models
+       
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         axes = axes.flatten()
         
-        # Show original
+        
         orig_np = x.squeeze().permute(1, 2, 0).cpu().numpy()
         axes[0].imshow(orig_np)
         axes[0].set_title("Original", fontsize=12, fontweight='bold')
         axes[0].axis("off")
         
-        # Show 4 reconstructions
+        
         for idx, result in enumerate(results):
             axes[idx + 1].imshow(result['reconstruction'])
             axes[idx + 1].set_title(
@@ -210,21 +216,21 @@ def main():
             )
             axes[idx + 1].axis("off")
         
-        # Hide last unused subplot
+        
         axes[5].axis("off")
         
     else:
-        # 2x3 grid: original + 5 models
+        
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         axes = axes.flatten()
         
-        # Show original
+        
         orig_np = x.squeeze().permute(1, 2, 0).cpu().numpy()
         axes[0].imshow(orig_np)
         axes[0].set_title("Original", fontsize=12, fontweight='bold')
         axes[0].axis("off")
         
-        # Show 5 reconstructions
+        
         for idx, result in enumerate(results):
             axes[idx + 1].imshow(result['reconstruction'])
             axes[idx + 1].set_title(
