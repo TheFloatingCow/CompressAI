@@ -1,8 +1,14 @@
 """
-CompressAI Model Comparison Script
-
+Pretrained Option:
 Loads a random image from the landscapes dataset and applies 5 compression models.
-Displays original + 5 reconstructions with PSNR and BPP metrics.
+Displays original and reconstructions with PSNR, BPP, encode/decode times.
+
+Retrained Option:
+Loads a random image from the landscapes dataset and applies the pretrained and retrained versions of
+factorized and hyperprior models.
+Displays original and reconstructions with PSNR, BPP, encode/decode times.
+
+
 """
 
 import os
@@ -76,19 +82,17 @@ def load_landscape_image():
 
 
 def main():
-    # Get quality level from user
+
     while True:
-        try:
-            quality = int(input("Enter desired quality level (1-6): "))
-            if 1 <= quality <= 6:
-                break
-            print("Please enter a number between 1 and 6.")
-        except ValueError:
-            print("Please enter a valid number.")
+        choice = input("Test retrained models? (y/n): ").strip().lower()
+        if choice in ("y", "n"):
+            test_retrained = choice == "y"
+            break
+        print("Please enter 'y' or 'n'.")
     
-    print(f"\nUsing quality level: {quality}\n")
+    print()
     
-    # Load image
+
     img = load_landscape_image()
     
     # Convert to tensor [1, 3, H, W], normalized to [0,1]
@@ -98,51 +102,58 @@ def main():
     print(f"Using device: {device}\n")
     x = x.to(device)
     
-    #checkpoint paths
-    factorized_ckpt = "checkpoint_best_loss_factorized1e-3.pth.tar"  
-    hyperprior_ckpt = "checkpoint_best_loss_hyperprior1e-3.pth.tar"  
-
-    # Prompt user for pretrained or retrained for each model
-    def ask_choice(model_name):
-        while True:
-            choice = input(f"Use retrained checkpoint for {model_name}? (y/n): ").strip().lower()
-            if choice in ("y", "n"): return choice == "y"
-            print("Please enter 'y' or 'n'.")
-
-    use_factorized_retrained = ask_choice("bmshj2018-factorized")
-    use_hyperprior_retrained = ask_choice("bmshj2018-hyperprior")
-
     models = []
-    # Factorized Prior
-    if use_factorized_retrained:
-        print(f"Loading retrained checkpoint for bmshj2018-factorized: {factorized_ckpt}")
-        model = bmshj2018_factorized(quality=quality, pretrained=False)
+    
+    if test_retrained:
+        # Retrained models 
+        factorized_ckpt = "checkpoint_best_loss_factorized1e-3.pth.tar"  
+        hyperprior_ckpt = "checkpoint_best_loss_hyperprior1e-3.pth.tar"
+        retrained_quality = 1 
+        
+        print("Loading retrained models...\n")
+        
+        # Factorized - Retrained
+        print(f"Loading retrained factorized: {factorized_ckpt}")
+        model = bmshj2018_factorized(quality=retrained_quality, pretrained=False)
         checkpoint = torch.load(factorized_ckpt, map_location=device)
-
         model.load_state_dict(checkpoint)
         model = model.eval().to(device)
-        models.append(('Factorized Prior (Retrained, 10 Epochs)', model))
-    else:
-        models.append(('Factorized Prior (Pretrained)', bmshj2018_factorized(quality=quality, pretrained=True)))
-
-    # Scale Hyperprior
-    if use_hyperprior_retrained:
-        print(f"Loading retrained checkpoint for bmshj2018-hyperprior: {hyperprior_ckpt}")
-        model = bmshj2018_hyperprior(quality=quality, pretrained=False)
+        models.append(('Factorized Prior (Retrained)', model))
+        
+        # Factorized - Pretrained
+        models.append(('Factorized Prior (Pretrained)', bmshj2018_factorized(quality=retrained_quality, pretrained=True)))
+        
+        # Hyperprior - Retrained
+        print(f"Loading retrained hyperprior: {hyperprior_ckpt}")
+        model = bmshj2018_hyperprior(quality=retrained_quality, pretrained=False)
         checkpoint = torch.load(hyperprior_ckpt, map_location=device)
-       
         model.load_state_dict(checkpoint)
         model = model.eval().to(device)
-        models.append(('Scale Hyperprior (Retrained, 10 Epochs)', model))
+        models.append(('Scale Hyperprior (Retrained)', model))
+        
+        # Hyperprior - Pretrained
+        models.append(('Scale Hyperprior (Pretrained)', bmshj2018_hyperprior(quality=retrained_quality, pretrained=True)))
+        
     else:
-        models.append(('Scale Hyperprior (Pretrained)', bmshj2018_hyperprior(quality=quality, pretrained=True)))
-
-    # The rest always use pretrained
-    models += [
-        ('Mean-Scale Hyperprior', mbt2018_mean(quality=quality, pretrained=True)),
-        ('Autoregressive', mbt2018(quality=quality, pretrained=True)),
-        ('Cheng2020 Anchor', cheng2020_anchor(quality=quality, pretrained=True)),
-    ]
+        # Pretrained models
+        while True:
+            try:
+                quality = int(input("Enter desired quality level (1-6): "))
+                if 1 <= quality <= 6:
+                    break
+                print("Please enter a number between 1 and 6.")
+            except ValueError:
+                print("Please enter a valid number.")
+        
+        print(f"\nUsing quality level: {quality}\n")
+        
+        models = [
+            ('Factorized Prior', bmshj2018_factorized(quality=quality, pretrained=True)),
+            ('Scale Hyperprior', bmshj2018_hyperprior(quality=quality, pretrained=True)),
+            ('Mean-Scale Hyperprior', mbt2018_mean(quality=quality, pretrained=True)),
+            ('Autoregressive', mbt2018(quality=quality, pretrained=True)),
+            ('Cheng2020 Anchor', cheng2020_anchor(quality=quality, pretrained=True)),
+        ]
     
     results = []
     
@@ -152,12 +163,12 @@ def main():
         model = model.eval().to(device)
         
         with torch.no_grad():
-            # Compress with timing
+            # Encode with timing
             start_time = time.time()
             compressed = model.compress(x)
             encode_time = time.time() - start_time
             
-            # Decompress with timing
+            # Decode with timing
             start_time = time.time()
             reconstructed = model.decompress(compressed["strings"], compressed["shape"])
             decode_time = time.time() - start_time
@@ -168,7 +179,7 @@ def main():
             psnr = compute_psnr(x, x_hat).item()
             bpp = compute_bpp(compressed["strings"], x.shape[2], x.shape[3])
             
-            # Store results
+            
             recon_np = x_hat.squeeze().permute(1, 2, 0).cpu().numpy()
             results.append({
                 'name': model_name,
@@ -182,26 +193,53 @@ def main():
             print(f"  PSNR: {psnr:.2f} dB, BPP: {bpp:.4f}")
             print(f"  Encode: {encode_time*1000:.1f} ms, Decode: {decode_time*1000:.1f} ms\n")
     
-    # Display results
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    axes = axes.flatten()
-    
-    # Show original
-    orig_np = x.squeeze().permute(1, 2, 0).cpu().numpy()
-    axes[0].imshow(orig_np)
-    axes[0].set_title("Original", fontsize=12, fontweight='bold')
-    axes[0].axis("off")
-    
-    # Show reconstructions
-    for idx, result in enumerate(results):
-        axes[idx + 1].imshow(result['reconstruction'])
-        axes[idx + 1].set_title(
-            f"{result['name']}\n"
-            f"PSNR: {result['psnr']:.2f} dB | BPP: {result['bpp']:.4f}\n"
-            f"Enc: {result['encode_time']*1000:.1f}ms | Dec: {result['decode_time']*1000:.1f}ms",
-            fontsize=9
-        )
-        axes[idx + 1].axis("off")
+    # Display results 
+    if test_retrained:
+       
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        axes = axes.flatten()
+        
+        
+        orig_np = x.squeeze().permute(1, 2, 0).cpu().numpy()
+        axes[0].imshow(orig_np)
+        axes[0].set_title("Original", fontsize=12, fontweight='bold')
+        axes[0].axis("off")
+        
+        
+        for idx, result in enumerate(results):
+            axes[idx + 1].imshow(result['reconstruction'])
+            axes[idx + 1].set_title(
+                f"{result['name']}\n"
+                f"PSNR: {result['psnr']:.2f} dB | BPP: {result['bpp']:.4f}\n"
+                f"Enc: {result['encode_time']*1000:.1f}ms | Dec: {result['decode_time']*1000:.1f}ms",
+                fontsize=9
+            )
+            axes[idx + 1].axis("off")
+        
+        
+        axes[5].axis("off")
+        
+    else:
+        
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        axes = axes.flatten()
+        
+        
+        orig_np = x.squeeze().permute(1, 2, 0).cpu().numpy()
+        axes[0].imshow(orig_np)
+        axes[0].set_title("Original", fontsize=12, fontweight='bold')
+        axes[0].axis("off")
+        
+        
+        for idx, result in enumerate(results):
+            axes[idx + 1].imshow(result['reconstruction'])
+            axes[idx + 1].set_title(
+                f"{result['name']}\n"
+                f"PSNR: {result['psnr']:.2f} dB | BPP: {result['bpp']:.4f}\n"
+                f"Enc: {result['encode_time']*1000:.1f}ms | Dec: {result['decode_time']*1000:.1f}ms",
+                fontsize=9
+            )
+            axes[idx + 1].axis("off")
     
     plt.tight_layout()
     plt.show()
